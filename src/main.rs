@@ -2,12 +2,13 @@ use std::rc::{Rc, Weak};
 use std::ops::DerefMut;
 use core::borrow::BorrowMut;
 use std::cell::RefCell;
+use futures_util::io::AsyncReadExt;
 
 type Key = [u8; 32];
 type NodeId = usize;
 
 struct BPlusTree {
-    t: u32,
+    t: usize,
     n: u32,
 
     nodes: Vec<Node>,
@@ -17,7 +18,23 @@ impl BPlusTree {
     pub fn add(&mut self, key: Key) {
         let node_id = self._search(key);
 
-        self.nodes[node_id].keys.push(key)
+        let mut node = &mut self.nodes[node_id];
+
+        node.keys.push(key);
+        node.keys.sort_unstable();
+
+        if node.keys.len() > (self.t - 1) {
+            self.split(node_id);
+        }
+    }
+
+    fn split(&self, node_id: NodeId) {
+        let new_node = Node {
+            keys: Vec::<Key>::new(),
+            childs: Vec::<NodeId>::new(),
+        };
+
+        
     }
 
     fn _search(&self, key: Key) -> NodeId {
@@ -98,13 +115,6 @@ fn main() {
     tree.add(str_to_key("4"));
     tree.add(str_to_key("5"));
     tree.add(str_to_key("6"));
-
-    tree.nodes.push(Node {
-        keys: Vec::<Key>::new(),
-        childs: Vec::<NodeId>::new(),
-    });
-    tree.nodes[0].childs.push(1);
-    tree.nodes[1].keys.push(str_to_key("6"));
 
 //    let s = std::str::from_utf8(&tree.nodes[0].keys[3]).unwrap();
 //    println!("{}", s);
