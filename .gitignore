@@ -1,3 +1,122 @@
 /target
 **/*.rs.bk
 .idea/
+
+(function() {
+var alertCont;
+function trackOldBrowserEvent(event) {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', '/badbrowser_stat.php?act=track&event=' + event);
+  xhr.send();
+}
+function exposeGlobals() {
+  window.hideOldBrowser = function() {
+    alertCont.remove();
+    var date = new Date();
+    date.setTime(date.getTime() + (7 * 24 * 60 * 60 * 1000));
+    var expiresDate = date.toGMTString();
+    var domain = window.locDomain;
+    document.cookie = 'remixoldbshown=1; expires=' + expiresDate + '; path=/' + (domain ? '; domain=.' + domain : '') + ';secure';
+    trackOldBrowserEvent('hideAlert');
+  }
+}
+function checkOldBrowser() {
+  if(!document.body) {
+    setTimeout(checkOldBrowser, 100);
+    return;
+  }
+  try {
+    if (!('noModule' in HTMLScriptElement.prototype)) {
+      exposeGlobals();
+      var alert = '<div class="OldBrowser__container" style="width:960px;">  Установите <a href="/badbrowser.php?source=old_browser_alert" target="_blank">один из этих браузеров</a>, чтобы работа ВКонтакте была быстрой и стабильной.  <span class="OldBrowser__close" aria-label="Закрыть"  role="button" onclick="hideOldBrowser();"></span></div>';
+      alertCont = document.createElement('div');
+      alertCont.className = 'OldBrowser';
+      alertCont.id = 'old_browser_wrap';
+      alertCont.innerHTML = alert;
+      document.body.appendChild(alertCont);
+      trackOldBrowserEvent('showAlert');
+    }
+  } catch(e) {}
+}
+checkOldBrowser();
+})();
+var vk = {
+  ads_rotate_interval: 120000,
+  al: parseInt('3') || 4,
+  id: 15466560,
+  intnat: '' ? true : false,
+  host: 'vk.com',
+  loginDomain: 'https://login.vk.com/',
+  lang: 0,
+  statsMeta: {"platform":"web2","st":false,"time":1591694785,"hash":"fu9P9MFSzv9aXCtftlct0IU2Zywwr9Mu1o7I4svlpM0"},
+  loaderNavSection: '',
+  rtl: parseInt('') || 0,
+  version: 11853389,
+  stDomains: 0,
+  stDomain: '',
+  wsTransport: 'https://stats.vk-portal.net',
+  stExcludedMasks: ["loader_nav","lang"],
+  zero: false,
+  contlen: 25902,
+  loginscheme: 'https',
+  ip_h: '901b8aeb69ea34270c',
+  navPrefix: '/',
+  dt: parseInt('0') || 0,
+  fs: parseInt('13') || 13,
+  ts: 1591694785,
+  tz: 10800,
+  pd: 0,
+  css_dir: '',
+  vcost: 7,
+  time: [2020, 6, 9, 12, 26, 25],
+  sampleUser: -1, spentLastSendTS: new Date().getTime(),
+  a11y: 0,
+  statusExportHash: 'd83e04c5c5d6421d57',
+  audioAdsConfig: {"enabled":false,"sections":["my","user_playlists","group_playlists","my_playlists","recent","audio_feed","recs","recs_audio","recs_album","search","global_search","group_list","user_list","user_wall","group_wall","feed","other","recoms_recoms","recoms_new_audios","recoms_new_albums","recoms_communities","recoms_added_recommendation","recoms_top_audios_global","recoms_mood_playlists","games","any_case_playlists","collections","genre_rock","genre_pop","genre_rap","editors_playlists","recoms_recent_recommendation","recoms_new_artists","recoms_friends","recoms_recent_audios","recoms_recent_playlists","recoms_top_audios_global","recoms_artist_promo_playlists","recommended_concerts","search_suggestions","search_owned_audios","search_owned_playlist","search_global_audios","search_global_communities","search_global_playlist","search_global_albums","search_global_artists","search_videoclips","artist_info","artist_main_albums","artist_main_audios","artist_featured_albums","artist_featured_audios","artist_featured_albums","artist_featured_albums","artist_pages","artist_events","artist_related","artist_new_album","artist_top_audios","artist_top_videos","artist_concerts"],"day_limit_reached":false},
+  longViewTestGroup: "page_view",
+  cma: 1,
+  lpConfig: {
+    enabled: 1,
+    key: '33413dc9c7fba11d4e7685c975ea625be43e61d5',
+    ts: 1679209054,
+    url: 'https://im.vk.com/nim15466560',
+    lpstat: 0
+  },
+
+  pr_tpl: "<div class=\"pr %cls%\" id=\"%id%\"><div class=\"pr_bt\"><\/div><div class=\"pr_bt\"><\/div><div class=\"pr_bt\"><\/div><\/div>",
+  push_hash: '02b68c94872f9a8fa2',
+
+  audioInlinePlayerTpl: "<div class=\"audio_inline_player _audio_inline_player no_select\">\n  <div class=\"audio_inline_player_right\">\n    <div class=\"audio_inline_player_volume\"><\/div>\n  <\/div>\n  <div class=\"audio_inline_player_left\">\n    <div class=\"audio_inline_player_progress\"><\/div>\n  <\/div>\n<\/div>",
+
+  pe: {"article_poll":1,"vk_apps_svg_qr":1,"upload.send_upload_stat":1,"push_notifier":1,"story_reactions_web":1,"notify_new_events_box":1,"web_ajax_json_object":1,"mini_apps_web_add_to_favorites":1,"mini_apps_web_add_to_menu":1,"cookie_class_samesite":1,"cookie_secure_default_true":1,"mvk_new_info_snackbar":1,"stickers_bot_link":1,"apps_promo_share_story":1,"widgets_xdm_same_origin":1,"stickers_money_transfer_suggestions":1,"web2_story_box_enabled":1,"bridge_mobile_story_box_enabled":1,"easy_market_promote_new_payment":1,"navigation_timespent":1,"mvk_mediascope_counter":1,"market_item_recommendations_view_log":1,"market_item_others_view_log":1,"web_stats_transport_story_view":1,"registration_item_stat":1,"mvk_lazy_static_reload":1,"notifications_view_new":1,"add_from_field_to_docs_box":1,"ads_market_autopromotion_bookmarks_stats":1,"web_stats_stage_url":1,"network_audio_fragment_stalled":1,"mini_apps_web_call_api_form_data":1},
+  countryISO: 'RU',
+};;vk.rv="24787";;if (!window.constants) { window.constants = {Groups: {
+  GROUPS_ADMIN_LEVEL_USER: 0,
+  GROUPS_ADMIN_LEVEL_MODERATOR: 1,
+  GROUPS_ADMIN_LEVEL_EDITOR: 2,
+  GROUPS_ADMIN_LEVEL_ADMINISTRATOR: 3,
+  GROUPS_ADMIN_LEVEL_HOST: 4,
+  GROUPS_ADMIN_LEVEL_EVENT_CREATOR: 5,
+  GROUPS_ADMIN_LEVEL_CREATOR: 6,
+  GROUPS_ADMIN_PSEUDO_LEVEL_ADVERTISER: 100
+}}; };
+
+window.locDomain = vk.host.match(/[a-zA-Z]+\.[a-zA-Z]+\.?$/)[0];
+var _ua = navigator.userAgent.toLowerCase();
+if (/opera/i.test(_ua) || !/msie 6/i.test(_ua) || document.domain != locDomain) document.domain = locDomain;
+var ___htest = (location.toString().match(/#(.*)/) || {})[1] || '', ___to;
+___htest = ___htest.split('#').pop();
+if (vk.al != 1 && ___htest.length && ___htest.substr(0, 1) == vk.navPrefix) {
+  if (vk.al != 3 || vk.navPrefix != '!') {
+    ___to = ___htest.replace(/^(\/|!)/, '');
+    if (___to.match(/^([^\?]*\.php|login|mobile|away)([^a-z0-9\.]|$)/)) ___to = '';
+    location.replace(location.protocol + '//' + location.host + '/' + ___to);
+  }
+}
+
+var StaticFiles = {
+  'cmodules/web/common_web.js' : {v: '183'},
+  'common.css':{v:52719122845},'base.css':{v:111429436879},'fonts_utf.css':{v:1},'fonts_cnt.css':{v:7802460376}
+  ,'cmodules/bundles/audioplayer.9371c749adaff53254df.js':{v:'c61e0bb5cf74af29516e'},'cmodules/bundles/common.ecfb9605778713a5732b.js':{v:'1722f05b78c952318d96'},'cmodules/web/common_web.db5505429f0e3bb787c5.js':{v:'54e37560ec6807ba79ed3cb1fe34fb37'},'lang0_0.js': {v: 26528246},'cmodules/bundles/b0203713c9b55abc70d41e4f64d46e60.c323896eb3b7cc658966.js':{v:'dfdad88a9a14a65f6e4f'},'cmodules/bundles/637aa6036536cb04f3a1f378656a0595.a27a71fa8f42521540ec.js':{v:'c7a73a807d438e66859a'},'cmodules/web/page.589adcf889b480868417.js':{v:'16a43b3d453c9ad54454b7e8230a4c1c'},'page.js':{v:964},'page.css':{v:95448242874},'post.css':{v:31375903756},'cmodules/web/wall.4507b034d39dec142e38.js':{v:'e19f56331bc239f7d81f95b5f35d1021'},'cmodules/web/wall.js':{v:85},'wall.css':{v:25483246128},'wide_dd.js':{v:1911393806},'wide_dd.css':{v:13079132724},'cmodules/web/pagination.e7b28020d088387b8663.js':{v:'ca9dfcb106cc7bdbaaadc13c8f4e6849'},'cmodules/web/pagination.js':{v:19},'cmodules/web/emoji.a753dabe2e2568a2e257.js':{v:'c133b58cc875b26d7e9976af3726f70e'},'cmodules/web/emoji.js':{v:1},'ui_common.css':{v:13842277194},'cmodules/bundles/4060411aa2c063eade7896c7daf24353.683b455b9c4740441adc.js':{v:'7519bffa059a40960aa5'},'cmodules/bundles/2bddcf8eba73bbb0902e1b2f9d33962b.7a534ccb21b729cb117f.js':{v:'eb2a1f6a7c004fd13ab4'},'cmodules/web/ui_common.a282f38e496111476306.js':{v:'f8341c870404d171d7b7ea0025d44495'},'ui_common.js':{v:6},'cmodules/bundles/4ad6740d9b54e18c214b1584b85679ea.f38f9f3d11aa5b5eeaf2.js':{v:'c73c8ab4bf093b156ab4'},'cmodules/web/ui_media_selector.e5c7153e06f8396cd6f6.js':{v:'7f443119c3e98b27fdab7ed8dde80279'},'cmodules/web/ui_media_selector.js':{v:9},'ui_media_selector.css':{v:35462965961},'notifier.css':{v:28374666242},'mrtarg.js':{v:1146267795},'mrtarg.css':{v:2264744769},'cmodules/web/css_types.6b4d012ca1669593da7f.js':{v:'53d3e8050c54fd79d9b7'},'cmodules/web/css_types.js':{v:1},'cmodules/web/jobs_devtools_notification.95033627ab9961dca832.js':{v:'f4f44db71cce7f91353246daa6cbdbf4'},'cmodules/web/jobs_devtools_notification.js':{v:1},'cmodules/web/page_layout.a304ae31e1ddbca2ffe4.js':{v:'14c8812cb982f1a3c297'},'cmodules/web/page_layout.js':{v:1},'cmodules/bundles/f8a3b0b69a90b5305d627c89f0bd674e.cc97c09146e8da462da2.js':{v:'6f0dd750aa9444efd2fd'},'cmodules/web/likes.36757ea9305dc2c0d64e.js':{v:'198b7ee750b4401bc560340fb0edec10'},'cmodules/web/likes.js':{v:1},'cmodules/bundles/vendors.9ef374bef18177ddb811.js':{v:'8371ae05713db3e96b97'},'cmodules/bundles/1c6a9b415901224f27daf60c6bc90be0.736a51ecc92c519be20c.js':{v:'6ceea13660e3da3ebfbf'},'cmodules/web/notifier.5e2bba1fb3f52c4c9d14.js':{v:'a41d42d4360272e4cd132e73f0239109'},'notifier.js':{v:391}
+}
+var abp;

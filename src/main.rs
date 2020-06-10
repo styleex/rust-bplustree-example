@@ -1,17 +1,15 @@
-use std::rc::{Rc, Weak};
-use std::ops::DerefMut;
-use core::borrow::BorrowMut;
-use std::cell::RefCell;
-use futures_util::io::AsyncReadExt;
-
 type Key = [u8; 32];
 type NodeId = usize;
 
+// https://gist.github.com/savarin/69acd246302567395f65ad6b97ee503d
+
+
 struct BPlusTree {
     t: usize,
-    n: u32,
+    n: usize,
 
     nodes: Vec<Node>,
+    root_id: NodeId,
 }
 
 impl BPlusTree {
@@ -29,12 +27,17 @@ impl BPlusTree {
     }
 
     fn split(&self, node_id: NodeId) {
-        let new_node = Node {
+        let left = Node {
             keys: Vec::<Key>::new(),
             childs: Vec::<NodeId>::new(),
         };
 
-        
+        let right = Node {
+            keys: Vec::<Key>::new(),
+            childs: Vec::<NodeId>::new(),
+        };
+
+
     }
 
     fn _search(&self, key: Key) -> NodeId {
@@ -97,11 +100,17 @@ fn print_tree(tree: &BPlusTree) {
 }
 
 fn main() {
+    let mut vec = vec![1, 2, 3, 4];
+    let vec2 = vec.split_off(5);
+    println!("{:?}", vec);
+    println!("{:?}", vec2);
+
     let mut tree = BPlusTree {
         n: 3,
         t: 3,
 
         nodes: Vec::new(),
+        root_id: 0,
     };
 
     tree.nodes.push(Node {
