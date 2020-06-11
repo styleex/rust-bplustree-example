@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use core::fmt;
+use std::iter::FromIterator;
 
 const MAX_KEY_SIZE: usize = 32;
 
@@ -8,6 +9,12 @@ type Key = [u8; MAX_KEY_SIZE];
 type NodeId = i64;
 
 // https://gist.github.com/savarin/69acd246302567395f65ad6b97ee503d
+struct Node {
+    id: NodeId,
+    parent_id: Option<NodeId>,
+    keys: Vec<Key>,
+    childs: Vec<NodeId>,
+}
 
 struct BPlusTree {
     order: usize, // Сколько потомков может хранить нода
@@ -148,30 +155,16 @@ fn str_to_key(val: &str) -> Key {
         ret[MAX_KEY_SIZE - i - 1] = b;
     }
 
-    return ret;
+    ret
 }
 
 fn key_to_str(val: &Key) -> String {
-    let mut name: String = String::new();
-
-    for &i in val.iter() {
-        if i == 0 {
-            continue;
-        }
-
-        name.push(i as char);
-    };
-
-    return name;
+    String::from_iter(
+        val.iter()
+            .filter(|&&x| x != 0)
+            .map(|&x| x as char)
+    )
 }
-
-struct Node {
-    id: NodeId,
-    parent_id: Option<NodeId>,
-    keys: Vec<Key>,
-    childs: Vec<NodeId>,
-}
-
 
 impl Display for BPlusTree {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -190,15 +183,18 @@ impl Display for BPlusTree {
             let mut name: String = String::new();
             for _ in 0..level {
                 name.push_str("  ");
+                if level > 0 {
+                    name.push_str("|");
+                }
             }
+            name.push_str("--");
 
-            if level > 0 {
-                name.push_str("| ");
-            }
-
-            for k in node.keys.iter() {
+            for (idx, k) in node.keys.iter().enumerate() {
                 name.push_str(key_to_str(k).as_str());
-                name.push_str(",");
+
+                if idx < node.keys.len() - 1 {
+                    name.push_str(",");
+                }
             }
 
             write!(f, "{} (id={}, parent_id={:?})\n", name.as_str(), node.id, node.parent_id)?;
