@@ -1,133 +1,105 @@
-use std::cmp::Ordering;
-
 type Key = [u8; 32];
 
 type NodeId = i64;
-const INVALID_NODE_ID: NodeId = -1;
 
 // https://gist.github.com/savarin/69acd246302567395f65ad6b97ee503d
 
 struct BPlusTree {
-    order: usize, // Параметр дерева
+    order: usize, // Сколько потомков может хранить нода
 
     nodes: Vec<Node>,
+    // Список всех нод дерева
     root_id: NodeId,
 }
 
 impl BPlusTree {
     pub fn add(&mut self, key: Key) {
-        let node_id = self._search(&key);
-        self.insert_key_to_node(node_id, key);
+        let target_node_id = self._search(&key);
+        self.insert_key_to_node(target_node_id, key);
 
-        if self.nodes[node_id as usize].keys.len() >= self.order {
-            let mut node_to_split = node_id;
-            while node_to_split != INVALID_NODE_ID && self.nodes[node_to_split as usize].keys.len() >= self.order {
-                self.split(node_to_split);
-                node_to_split = self.nodes[node_to_split as usize].parent_id;
+        let mut node_to_split = Some(target_node_id);
+        while let Some(node_id) = node_to_split {
+            if self.node(node_id).keys.len() < self.order {
+                break;
             }
+
+            self.split(node_id);
+            node_to_split = self.node(node_id).parent_id;
         }
+    }
+
+    fn node_mut(&mut self, id: NodeId) -> &mut Node {
+        &mut self.nodes[id as usize]
+    }
+
+    fn node(&self, id: NodeId) -> &Node {
+        &self.nodes[id as usize]
     }
 
     fn insert_key_to_node(&mut self, node_id: NodeId, key: Key) {
-        let mut ret_idx = None;
-        for (idx, i) in self.nodes[node_id as usize].keys.iter().enumerate() {
-            // key < i
-            if key < *i {
-                ret_idx = Some(idx);
-                break;
-            }
-        }
+        let ret_idx = self.node_mut(node_id).keys.binary_search(&key)
+            .unwrap_or_else(|x| x);
 
-        if let Some(idx) = ret_idx {
-            self.nodes[node_id as usize].keys.insert(idx, key);
-        } else {
-            self.nodes[node_id as usize].keys.push(key);
-        }
+        self.node_mut(node_id).keys.insert(ret_idx, key);
     }
 
-    fn split(&mut self, node_id: NodeId) {
-        let middle = self.order / 2;
-        let right_node_id = self.nodes.len() as NodeId;
-
-        let parent_id = self.nodes[node_id as usize].parent_id;
-        let right_keys = {
-            let node = &mut self.nodes[node_id as usize];
-
-            node.keys.split_off(middle)
-        };
-
-        let right_childs = {
-            let node = &mut self.nodes[node_id as usize];
-
-            if node.childs.len() > 0 {
-                node.childs.split_off(middle + 1)
-            } else {
-                Vec::<NodeId>::new()
-            }
-        };
-
-        for child_id in right_childs.iter() {
-            self.nodes[*child_id as usize].parent_id = right_node_id;
+    // Регистрирует ноду в дереве и обновляет ссылки у дочерних элементов на вновь созданный ID
+    fn create_node(&mut self, parent_id: Option<NodeId>, keys: Vec<Key>, childs: Vec<NodeId>) -> NodeId {
+        let id = self.nodes.len() as NodeId;
+        for &child_id in childs.iter() {
+            self.node_mut(child_id).parent_id = Some(id);
         }
 
         self.nodes.push(Node {
-            id: right_node_id,
-            parent_id: INVALID_NODE_ID,
-            keys: right_keys,
-            childs: right_childs,
+            id: self.nodes.len() as NodeId,
+            parent_id,
+            keys,
+            childs,
         });
 
-        let new_parent_id = {
-            if parent_id == INVALID_NODE_ID {
-                // Расщепляется корень, надо создать новый
-                let new_root_id = self.nodes.len() as NodeId;
-                let mut new_parent_node = Node {
-                    id: new_root_id,
-                    parent_id: INVALID_NODE_ID,
-                    keys: vec![self.nodes[right_node_id as usize].keys[0]],
-                    childs: vec![node_id, right_node_id],
-                };
+        return id;
+    }
 
-                self.nodes.push(new_parent_node);
-                self.root_id = new_root_id;
+    fn split(&mut self, left_node_id: NodeId) {
+        let middle = self.order / 2;
 
-                new_root_id
-            } else {
-                let new_key = self.nodes[right_node_id as usize].keys[0];
-                // let parent = &mut self.nodes[parent_id as usize];
+        let parent_id = self.node_mut(left_node_id).parent_id;
 
-                // FIXME: search correct position
-                self.insert_key_to_node(parent_id, new_key);
-
-                let parent = &mut self.nodes[parent_id as usize];
-                let mut idx = None;
-                for (i, child_id) in parent.childs.iter().enumerate() {
-                    if node_id == *child_id {
-                        idx = Some(i);
-                        break;
-                    }
-                }
-
-                if let Some(i) = idx {
-                    parent.childs.insert(i + 1, right_node_id);
-                } else {
-                    panic!("Invalid parent");
-                }
-                // self.insert_child_to_node(parent_id, right_node_id);
-                // parent.childs.push(right_node_id);
-
-                parent_id
-            }
+        let right_keys = self.node_mut(left_node_id).keys.split_off(middle);
+        let right_childs = if self.node_mut(left_node_id).childs.len() > 0 {
+            self.node_mut(left_node_id).childs.split_off(middle + 1)
+        } else {
+            Vec::<NodeId>::new()
         };
 
-        // Если длим родительский элемент, то первый элемент правого поддерева уходит его предку
-        // и в правой ноде он становится вообще бесполезен.
-        if self.nodes[node_id as usize].childs.len() > 0 {
-            self.nodes[right_node_id as usize].keys.remove(0);
-        }
+        let right_node_id = self.create_node(parent_id, right_keys, right_childs);
 
-        self.nodes[node_id as usize].parent_id = new_parent_id;
-        self.nodes[right_node_id as usize].parent_id = new_parent_id;
+        if parent_id.is_none() {
+            // Расщепляется корень, надо создать новый
+            let first_right_key = self.node_mut(right_node_id).keys[0];
+
+            self.root_id = self.create_node(None, vec![first_right_key],
+                                            vec![left_node_id, right_node_id]);
+        } else {
+            // Добавляем наименьший ключ нового узла родителю
+            let new_key = self.node_mut(right_node_id).keys[0];
+            self.insert_key_to_node(parent_id.unwrap(), new_key);
+
+            // Вставляем ссылку на новый узел сразу же после исходного узла
+            let parent = self.node_mut(parent_id.unwrap());
+
+            let child_idx = parent.childs.iter()
+                .position(|&x| x == left_node_id)
+                .expect("Invalid parent_id on node. Node not found in parent.childs");
+
+            parent.childs.insert(child_idx + 1, right_node_id);
+        };
+
+        // Если делим родительский элемент, то первый элемент правого поддерева уходит его предку
+        // и в правой ноде он становится вообще бесполезен.
+        if self.node_mut(left_node_id).childs.len() > 0 {
+            self.node_mut(right_node_id).keys.remove(0);
+        }
     }
 
     fn _search(&self, key: &Key) -> NodeId {
@@ -144,17 +116,9 @@ impl BPlusTree {
         // key < keys[0] -> 0
         // keys[i] <= key < key[i+1] -> i
         // key > keys[last] -> last
-        let mut child_index = INVALID_NODE_ID;
-        for (idx, range_key) in self.nodes[node_id as usize].keys.iter().enumerate() {
-            if key < range_key {
-                child_index = idx as NodeId;
-                break;
-            }
-        }
-
-        if child_index == INVALID_NODE_ID {
-            child_index = (self.nodes[node_id as usize].childs.len() - 1) as NodeId;
-        }
+        let child_index = self.node(node_id).keys.iter()
+            .position(|x| key < x)
+            .unwrap_or(self.node(node_id).childs.len() - 1);
 
         return self._tree_search(key, node.childs[child_index as usize]);
     }
@@ -174,7 +138,7 @@ fn key_to_str(val: &Key) -> String {
 
     for i in val.iter() {
         if *i == 0 {
-            continue
+            continue;
         }
 
         name.push(*i as char);
@@ -185,10 +149,11 @@ fn key_to_str(val: &Key) -> String {
 
 struct Node {
     id: NodeId,
-    parent_id: NodeId,
+    parent_id: Option<NodeId>,
     keys: Vec<Key>,
     childs: Vec<NodeId>,
 }
+
 
 fn print_tree(tree: &BPlusTree) {
     let mut stack = Vec::<(NodeId, u32)>::new();
@@ -204,7 +169,7 @@ fn print_tree(tree: &BPlusTree) {
         let node = &tree.nodes[node_id as usize];
 
         let mut name: String = String::new();
-        for i in 0..level {
+        for _ in 0..level {
             name.push_str("  ");
         }
 
@@ -217,7 +182,7 @@ fn print_tree(tree: &BPlusTree) {
             name.push_str(",");
         }
 
-        println!("{} (id={}, parent_id={})", name.as_str(), node.id, node.parent_id);
+        println!("{} (id={}, parent_id={:?})", name.as_str(), node.id, node.parent_id);
 
         for child_id in node.childs.iter() {
             stack.push((*child_id, level + 1));
@@ -226,9 +191,6 @@ fn print_tree(tree: &BPlusTree) {
 }
 
 fn main() {
-    let mut qwe = vec![1,2,3];
-    qwe.insert(qwe.len() -1 , 4);
-    println!("{:?}", qwe);
     let mut tree = BPlusTree {
         order: 4,
 
@@ -236,12 +198,7 @@ fn main() {
         root_id: 0,
     };
 
-    tree.nodes.push(Node {
-        id: 0,
-        parent_id: INVALID_NODE_ID,
-        keys: Vec::<Key>::new(),
-        childs: Vec::<NodeId>::new(),
-    });
+    tree.create_node(None, vec![], vec![]);
 
     tree.add(str_to_key("1"));
     tree.add(str_to_key("2"));
@@ -271,10 +228,5 @@ fn main() {
     tree.add(str_to_key("24"));
     tree.add(str_to_key("92"));
 
-    //    let s = std::str::from_utf8(&tree.nodes[0].keys[3]).unwrap();
-    //    println!("{}", s);
-
     print_tree(&tree);
-
-    println!("{:?}", &str_to_key("40") > &str_to_key("094"));
 }
