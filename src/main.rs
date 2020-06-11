@@ -1,4 +1,9 @@
-type Key = [u8; 32];
+use std::fmt::Display;
+use core::fmt;
+
+const MAX_KEY_SIZE: usize = 32;
+
+type Key = [u8; MAX_KEY_SIZE];
 
 type NodeId = i64;
 
@@ -13,6 +18,18 @@ struct BPlusTree {
 }
 
 impl BPlusTree {
+    pub fn new(order: usize) -> BPlusTree {
+        BPlusTree {
+            order,
+            nodes: vec![Node {
+                id: 0,
+                parent_id: None,
+                childs: vec![],
+                keys: vec![],
+            }],
+            root_id: 0,
+        }
+    }
     pub fn add(&mut self, key: Key) {
         let target_node_id = self._search(&key);
         self.insert_key_to_node(target_node_id, key);
@@ -63,8 +80,8 @@ impl BPlusTree {
     fn split(&mut self, left_node_id: NodeId) {
         let middle = self.order / 2;
 
-        let parent_id = self.node_mut(left_node_id).parent_id;
-
+        // Правая нода забирает себе старшие ключи и потомков, которые
+        // содержат старшие диапазоны (если это не лист)
         let right_keys = self.node_mut(left_node_id).keys.split_off(middle);
         let right_childs = if self.node_mut(left_node_id).childs.len() > 0 {
             self.node_mut(left_node_id).childs.split_off(middle + 1)
@@ -72,34 +89,35 @@ impl BPlusTree {
             Vec::<NodeId>::new()
         };
 
+        let parent_id = self.node_mut(left_node_id).parent_id;
         let right_node_id = self.create_node(parent_id, right_keys, right_childs);
-
-        if parent_id.is_none() {
-            // Расщепляется корень, надо создать новый
-            let first_right_key = self.node_mut(right_node_id).keys[0];
-
-            self.root_id = self.create_node(None, vec![first_right_key],
-                                            vec![left_node_id, right_node_id]);
-        } else {
-            // Добавляем наименьший ключ нового узла родителю
-            let new_key = self.node_mut(right_node_id).keys[0];
-            self.insert_key_to_node(parent_id.unwrap(), new_key);
-
-            // Вставляем ссылку на новый узел сразу же после исходного узла
-            let parent = self.node_mut(parent_id.unwrap());
-
-            let child_idx = parent.childs.iter()
-                .position(|&x| x == left_node_id)
-                .expect("Invalid parent_id on node. Node not found in parent.childs");
-
-            parent.childs.insert(child_idx + 1, right_node_id);
-        };
 
         // Если делим родительский элемент, то первый элемент правого поддерева уходит его предку
         // и в правой ноде он становится вообще бесполезен.
-        if self.node_mut(left_node_id).childs.len() > 0 {
+        let first_right_key = self.node_mut(right_node_id).keys[0];
+        if self.node(right_node_id).childs.len() > 0 {
             self.node_mut(right_node_id).keys.remove(0);
         }
+
+        if let Some(parent_id) = parent_id {
+            // Добавляем наименьший ключ нового узла родителю
+            self.insert_key_to_node(parent_id, first_right_key);
+
+            // Вставляем ссылку на новый узел сразу же после исходного узла
+            let parent = self.node_mut(parent_id);
+
+            let right_child_idx = parent.childs.iter()
+                .position(|&x| x == left_node_id)
+                .expect("Invalid parent_id on node. Node not found in parent.childs");
+
+            parent.childs.insert(right_child_idx + 1, right_node_id);
+        } else {
+            // Расщепляется корень, надо создать новый
+            self.root_id = self.create_node(
+                None,
+                vec![first_right_key],
+                vec![left_node_id, right_node_id]);
+        };
     }
 
     fn _search(&self, key: &Key) -> NodeId {
@@ -107,7 +125,7 @@ impl BPlusTree {
     }
 
     fn _tree_search(&self, key: &Key, node_id: NodeId) -> NodeId {
-        let node = &self.nodes[node_id as usize];
+        let node = self.node(node_id);
         if node.childs.len() == 0 {
             return node_id;
         }
@@ -116,18 +134,18 @@ impl BPlusTree {
         // key < keys[0] -> 0
         // keys[i] <= key < key[i+1] -> i
         // key > keys[last] -> last
-        let child_index = self.node(node_id).keys.iter()
+        let child_index = node.keys.iter()
             .position(|x| key < x)
-            .unwrap_or(self.node(node_id).childs.len() - 1);
+            .unwrap_or(node.childs.len() - 1);
 
         return self._tree_search(key, node.childs[child_index as usize]);
     }
 }
 
 fn str_to_key(val: &str) -> Key {
-    let mut ret: Key = [0; 32];
-    for (i, b) in val.as_bytes().iter().enumerate() {
-        ret[32 - val.len() + i] = *b;
+    let mut ret: Key = [0; MAX_KEY_SIZE];
+    for (i, &b) in val.as_bytes().iter().rev().enumerate() {
+        ret[MAX_KEY_SIZE - i - 1] = b;
     }
 
     return ret;
@@ -136,12 +154,12 @@ fn str_to_key(val: &str) -> Key {
 fn key_to_str(val: &Key) -> String {
     let mut name: String = String::new();
 
-    for i in val.iter() {
-        if *i == 0 {
+    for &i in val.iter() {
+        if i == 0 {
             continue;
         }
 
-        name.push(*i as char);
+        name.push(i as char);
     };
 
     return name;
@@ -155,51 +173,46 @@ struct Node {
 }
 
 
-fn print_tree(tree: &BPlusTree) {
-    let mut stack = Vec::<(NodeId, u32)>::new();
-    stack.push((tree.root_id, 0));
+impl Display for BPlusTree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut stack = Vec::<(NodeId, u32)>::new();
+        stack.push((self.root_id, 0));
 
-    loop {
-        if stack.len() == 0 {
-            break;
+        loop {
+            if stack.len() == 0 {
+                break;
+            }
+
+            let (node_id, level) = stack.pop().unwrap();
+
+            let node = &self.nodes[node_id as usize];
+
+            let mut name: String = String::new();
+            for _ in 0..level {
+                name.push_str("  ");
+            }
+
+            if level > 0 {
+                name.push_str("| ");
+            }
+
+            for k in node.keys.iter() {
+                name.push_str(key_to_str(k).as_str());
+                name.push_str(",");
+            }
+
+            write!(f, "{} (id={}, parent_id={:?})\n", name.as_str(), node.id, node.parent_id)?;
+
+            for &child_id in node.childs.iter() {
+                stack.push((child_id, level + 1));
+            }
         }
 
-        let (node_id, level) = stack.pop().unwrap();
-
-        let node = &tree.nodes[node_id as usize];
-
-        let mut name: String = String::new();
-        for _ in 0..level {
-            name.push_str("  ");
-        }
-
-        if level > 0 {
-            name.push_str("| ");
-        }
-
-        for k in node.keys.iter() {
-            name.push_str(key_to_str(k).as_str());
-            name.push_str(",");
-        }
-
-        println!("{} (id={}, parent_id={:?})", name.as_str(), node.id, node.parent_id);
-
-        for child_id in node.childs.iter() {
-            stack.push((*child_id, level + 1));
-        }
+        fmt::Result::Ok(())
     }
 }
-
 fn main() {
-    let mut tree = BPlusTree {
-        order: 4,
-
-        nodes: Vec::new(),
-        root_id: 0,
-    };
-
-    tree.create_node(None, vec![], vec![]);
-
+    let mut tree = BPlusTree::new(4);
     tree.add(str_to_key("1"));
     tree.add(str_to_key("2"));
     tree.add(str_to_key("3"));
@@ -217,7 +230,6 @@ fn main() {
     tree.add(str_to_key("15"));
     tree.add(str_to_key("16"));
 
-
     tree.add(str_to_key("88"));
     tree.add(str_to_key("56"));
     tree.add(str_to_key("100"));
@@ -228,5 +240,5 @@ fn main() {
     tree.add(str_to_key("24"));
     tree.add(str_to_key("92"));
 
-    print_tree(&tree);
+    println!("{}", &tree);
 }
