@@ -5,7 +5,16 @@ authors = ["Антон Владимиров <vladimirov.anton@pressindex.ru>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "writer"
+path = "src/main.rs"
+
+[[bin]]
+name = "reader"
+path = "src/reader/bin/main.rs"
 
 [dependencies]
-reqwest = { version = "0.10", features = ["json"] }
-tokio = { version = "0.2", features = ["full"] }
+memmap = "0.7.0"
+page_size = "0.4.2"
+bincode = "1.2.1"
+serde = { version = "1.0", features = ["derive"] }

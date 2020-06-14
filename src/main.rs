@@ -1,6 +1,8 @@
 use std::fmt::Display;
 use core::fmt;
 use std::iter::FromIterator;
+use std::str;
+
 
 const MAX_KEY_SIZE: usize = 32;
 
@@ -9,12 +11,14 @@ type Key = [u8; MAX_KEY_SIZE];
 type NodeId = usize;
 
 // Для листа содержит и ключ и значение. Для родителя только ключи
+#[repr(C, packed)]
 struct INode {
     key: Key,
     value: Option<Vec<u8>>,
 }
 
 // https://gist.github.com/savarin/69acd246302567395f65ad6b97ee503d
+#[repr(C, packed)]
 struct Node {
     id: NodeId,
     is_leaf: bool,
@@ -170,7 +174,7 @@ impl BPlusTree {
             .position(|x| key < &x.key)
             .unwrap_or(node.childs.len() - 1);
 
-        return self._tree_search(key, node.childs[child_index as usize]);
+        return self._tree_search(key, node.childs[child_index]);
     }
 }
 
@@ -233,8 +237,6 @@ impl Display for BPlusTree {
     }
 }
 
-use std::str;
-
 pub fn val_to_str(val: Option<&Vec<u8>>) -> &str {
     if val.is_none() {
         return "None";
@@ -243,6 +245,50 @@ pub fn val_to_str(val: Option<&Vec<u8>>) -> &str {
     return str::from_utf8(val.unwrap()).unwrap();
 }
 
+// extern crate serde_derive;
+extern crate bincode;
+use std::fs::{File, OpenOptions};
+use memmap::{Mmap, MmapOptions};
+use std::io::{Write, Result};
+use serde::{Serialize, Deserialize};
+use std::ptr::slice_from_raw_parts;
+use std::mem::size_of;
+const VERSION: u32 = 1;
+const MAGIC: u32 = 0x9B9AB9EE;
+
+#[repr(C, packed)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct Header {
+    magic: u32,
+    version: u32,
+    page_size: u32,
+}
+
+fn to_bytes<T>(val: &T) -> &[u8] where T: Sized {
+    let raw_h: *const u8 = (val as *const T) as *const u8;
+
+    unsafe {
+        slice_from_raw_parts(raw_h, size_of::<T>() as usize).as_ref().unwrap()
+    }
+}
+
+fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
+    let page_size = page_size::get();
+    let mut f = OpenOptions::new().read(true).write(true).create(true).open(path)?;
+    f.set_len(0)?;
+    f.set_len((page_size * 100) as u64)?;
+
+    let h = Header {
+        magic: MAGIC,
+        version: VERSION,
+        page_size: page_size as u32
+    };
+
+    f.write(to_bytes(&h))?;
+    f.write(to_bytes(&tree.nodes[2]))?;
+
+    Ok(())
+}
 
 fn main() {
     let mut tree = BPlusTree::new(4);
@@ -274,5 +320,6 @@ fn main() {
     tree.add(str_to_key("92"), "asd92".bytes().collect());
 
     println!("{}", &tree);
-    println!("{}", val_to_str(tree.get(str_to_key("56"))));
+    println!("{}", val_to_str(tree.get(str_to_key("1"))));
+    save_tree(&tree, "/home/anton/workspace/rust-bplustree-example/db.rust").unwrap();
 }
