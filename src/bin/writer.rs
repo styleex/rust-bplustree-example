@@ -2,6 +2,7 @@ use std::fmt::Display;
 use core::fmt;
 use std::iter::FromIterator;
 use std::str;
+
 mod types;
 
 const MAX_KEY_SIZE: usize = 32;
@@ -23,9 +24,34 @@ struct Node {
     id: NodeId,
     is_leaf: bool,
     parent_id: Option<NodeId>,
-    childs: Vec<NodeId>,
+    childs: Vec<NodeId>, // runtime only
 
     inodes: Vec<INode>,
+}
+
+impl Node {
+    pub fn size(&self) -> u64 {
+        let mut size = size_of::<Page>() as u64;
+
+        let stored_inode_size = if self.is_leaf {
+            size_of::<LeafStoredINode>()
+        } else {
+            size_of::<BranchStoredINode>()
+        } as u64;
+
+        for inode in self.inodes.iter() {
+            size += stored_inode_size + inode.key.len() as u64;
+
+            if inode.value.is_some() {
+                size += inode.value.as_ref().unwrap().len() as u64
+            }
+        };
+
+        size
+    }
+
+    pub fn serialize(&self, page: &mut Page) {
+    }
 }
 
 struct BPlusTree {
@@ -89,7 +115,7 @@ impl BPlusTree {
         let ret_idx = self.node_mut(node_id).inodes.binary_search_by_key(&key, |inode| inode.key)
             .unwrap_or_else(|x| x);
 
-        self.node_mut(node_id).inodes.insert(ret_idx, INode{key, value});
+        self.node_mut(node_id).inodes.insert(ret_idx, INode { key, value });
     }
 
     // Регистрирует ноду в дереве и обновляет ссылки у дочерних элементов на вновь созданный ID
@@ -150,7 +176,7 @@ impl BPlusTree {
             self.root_id = self.create_node(
                 false,
                 None,
-                vec![INode{key: first_right_key, value: None}],
+                vec![INode { key: first_right_key, value: None }],
                 vec![left_node_id, right_node_id],
             );
         };
@@ -247,6 +273,7 @@ pub fn val_to_str(val: Option<&Vec<u8>>) -> &str {
 
 // extern crate serde_derive;
 extern crate bincode;
+
 use std::fs::{File, OpenOptions};
 use memmap::{Mmap, MmapOptions};
 use std::io::{Write, Result};
@@ -254,6 +281,7 @@ use serde::{Serialize, Deserialize};
 use std::ptr::slice_from_raw_parts;
 use std::mem::size_of;
 use std::os::unix::fs::FileExt;
+use crate::types::{Page, LeafStoredINode, BranchStoredINode, PAGE_BRANCH};
 
 const VERSION: u32 = 1;
 const MAGIC: u32 = 0x9B9AB9EE;
@@ -267,6 +295,73 @@ fn to_bytes<T>(val: &T) -> &[u8] where T: Sized {
     }
 }
 
+struct Allocator {
+    page_size: usize,
+    free_pages: Vec::<u64>,
+    // page_ids
+    allocated_pages: Vec::<u64>,
+}
+
+impl Allocator {
+    pub fn new(page_size: usize, file_len: u64) -> Allocator {
+        let page_count = (file_len / page_size as u64) as usize;
+
+        let mut free_pages = vec![];
+        for i in 0..page_count {
+            free_pages.push(i as u64);
+        }
+
+        Allocator {
+            page_size,
+            free_pages,
+            allocated_pages: vec![],
+        }
+    }
+
+    pub fn get_free_page(&mut self, size: u64) -> Option<Page> {
+        let mut total_size = 0 as u64;
+        let mut pages = Vec::<u64>::new();
+        loop {
+            if self.free_pages.is_empty() {
+                return None;
+            }
+
+            let page_id = self.free_pages.remove(0);
+            pages.push(page_id);
+            self.allocated_pages.push(page_id);
+            total_size += self.page_size as u64;
+
+            if total_size >= size {
+                break;
+            }
+        }
+
+        Some(Page {
+            id: pages[0],
+            page_overflow_count: (pages.len() - 1) as u32,
+            flags: 0,
+            inode_count: 0,
+        })
+    }
+}
+
+fn from_bytes<T>(buf: &mut [u8]) -> Option<&mut T> where T: Sized {
+    let (_, mut body, _) = unsafe { buf.align_to_mut::<T>() };
+
+    if body.len() == 1 {
+        return Some(&mut body[0]);
+    }
+
+    None
+}
+
+fn serialize_data<T>(buf: &mut Vec<u8>, offset: usize, data: T) -> usize where T: Sized {
+    let data_page: &mut T = from_bytes(buf[offset..offset + size_of::<T>()].as_mut()).unwrap();
+    *data_page = data;
+
+    offset + size_of::<T>()
+}
+
 fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
     let page_size = page_size::get();
     let mut f = OpenOptions::new().read(true).write(true).create(true).open(path)?;
@@ -276,20 +371,57 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
     let h = types::Meta {
         magic: MAGIC,
         version: VERSION,
-        page_size: page_size as u32
+        page_size: page_size as u32,
     };
 
-    let pages = f.metadata().unwrap().len() / (page_size as u64);
+    let mut allocator = Allocator::new(page_size, f.metadata().unwrap().len());
 
-    let page = types::Page {
-        id: 0,
-        flags: types::PAGE_META,
-        inode_count: 0,
-        page_overflow_count: 0,
-    };
+    let mut page = allocator.get_free_page(page_size as u64).unwrap();
+    page.flags = types::PAGE_META;
 
     f.write(to_bytes(&page))?;
     f.write(to_bytes(&h))?;
+
+    let mut stack = vec![tree.root_id];
+    loop {
+        if stack.is_empty() {
+            break;
+        }
+
+        let node_id = stack.pop().unwrap();
+        let node_size = tree.node(node_id).size();
+        let mut node_data = Vec::<u8>::new();
+        node_data.resize(node_size as usize, 0);
+
+        let mut page = allocator.get_free_page(node_size).unwrap();
+        page.inode_count = tree.node(node_id).inodes.len() as u32;
+        page.flags = PAGE_BRANCH;
+
+        let page_id = page.id;
+        println!("{:?}", page);
+
+        let mut offset: usize = 0;
+        {
+            offset = serialize_data(&mut node_data, offset, page);
+        }
+
+        for inode in tree.node(node_id).inodes.iter() {
+            let data: BranchStoredINode = BranchStoredINode {
+                pos: offset as u32,
+                ksize: inode.key.len() as u32,
+                page_id,
+            };
+
+            offset = serialize_data(&mut node_data, offset, data);
+
+            node_data[offset..offset+inode.key.len()].copy_from_slice(inode.key.as_ref());
+            offset += inode.key.len();
+            // offset = serialize_data(&mut node_data, offset, inode.key.as_ref());
+        }
+
+
+        f.write_at(node_data.as_slice(), page_id * page_size as u64).unwrap();
+    }
 
 //    f.write_at();
 
@@ -327,5 +459,5 @@ fn main() {
 
     println!("{}", &tree);
     println!("{}", val_to_str(tree.get(str_to_key("1"))));
-    save_tree(&tree, "/home/vladimirov/workspace/rust_apps/db.rust").unwrap();
+    save_tree(&tree, "/home/anton/workspace/rust-bplustree-example/db.rust").unwrap();
 }

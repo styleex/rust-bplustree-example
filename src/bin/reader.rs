@@ -1,32 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::mem::size_of;
 mod types;
-const MAX_KEY_SIZE: usize = 32;
-
-type Key = [u8; MAX_KEY_SIZE];
-
-type NodeId = usize;
-
-// Для листа содержит и ключ и значение. Для родителя только ключи
-#[repr(C, packed)]
-#[derive(Debug)]
-struct INode {
-    key: Key,
-    value: Option<Vec<u8>>,
-}
-
-// https://gist.github.com/savarin/69acd246302567395f65ad6b97ee503d
-#[repr(C, packed)]
-#[derive(Debug)]
-struct Node {
-    id: NodeId,
-    is_leaf: bool,
-    parent_id: Option<NodeId>,
-    // childs: Vec<NodeId>,
-
-    // inodes: Vec<INode>,
-}
-
 
 fn mmap_view<T>(mmap: &[u8], offset: usize) -> &T where T: Sized + std::fmt::Debug {
     let (_, body, _) = unsafe { mmap[offset..offset+size_of::<T>()].align_to::<T>()};
@@ -35,7 +9,7 @@ fn mmap_view<T>(mmap: &[u8], offset: usize) -> &T where T: Sized + std::fmt::Deb
 }
 
 fn main() {
-    let path = "/home/vladimirov/workspace/rust_apps/db.rust";
+    let path = "/home/anton/workspace/rust-bplustree-example/db.rust";
     let mut f = OpenOptions::new().read(true).open(path).unwrap();
 
     let mmap_data= unsafe {
@@ -44,8 +18,25 @@ fn main() {
     };
 
     let page: &types::Page = mmap_view(&mmap_data, 0);
-    println!("{:?}", page.meta());
+    println!("{} {:?} {:?}", page.type_name(), page, page.meta());
 
+    let meta = page.meta().unwrap();
+
+    let base_offset = 1 * meta.page_size as usize;
+    let page: &types::Page = mmap_view(&mmap_data, base_offset);
+    println!("{}: {:?}", page.type_name(), page);
+
+    let mut offset: usize = size_of::<types::Page>();
+    for i in 0..page.inode_count {
+        let branch_data: &types::BranchStoredINode = mmap_view(&mmap_data, base_offset + offset);
+        offset += size_of::<types::BranchStoredINode>() as usize;
+
+        println!("{:?}", branch_data);
+
+        let key: &[u8] = &mmap_data[base_offset+offset..base_offset+offset+branch_data.ksize as usize];
+        offset += branch_data.ksize as usize;
+        println!("{}", types::key_to_str(key));
+    }
 //    let hdr: &Meta = mmap_view(&mmap_data, 0);
 //    println!("{:?}", hdr);
 //
