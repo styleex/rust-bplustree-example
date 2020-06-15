@@ -2,7 +2,7 @@ use std::fmt::Display;
 use core::fmt;
 use std::iter::FromIterator;
 use std::str;
-
+mod types;
 
 const MAX_KEY_SIZE: usize = 32;
 
@@ -253,16 +253,11 @@ use std::io::{Write, Result};
 use serde::{Serialize, Deserialize};
 use std::ptr::slice_from_raw_parts;
 use std::mem::size_of;
+use std::os::unix::fs::FileExt;
+
 const VERSION: u32 = 1;
 const MAGIC: u32 = 0x9B9AB9EE;
 
-#[repr(C, packed)]
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct Header {
-    magic: u32,
-    version: u32,
-    page_size: u32,
-}
 
 fn to_bytes<T>(val: &T) -> &[u8] where T: Sized {
     let raw_h: *const u8 = (val as *const T) as *const u8;
@@ -278,14 +273,25 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
     f.set_len(0)?;
     f.set_len((page_size * 100) as u64)?;
 
-    let h = Header {
+    let h = types::Meta {
         magic: MAGIC,
         version: VERSION,
         page_size: page_size as u32
     };
 
+    let pages = f.metadata().unwrap().len() / (page_size as u64);
+
+    let page = types::Page {
+        id: 0,
+        flags: types::PAGE_META,
+        inode_count: 0,
+        page_overflow_count: 0,
+    };
+
+    f.write(to_bytes(&page))?;
     f.write(to_bytes(&h))?;
-    f.write(to_bytes(&tree.nodes[2]))?;
+
+//    f.write_at();
 
     Ok(())
 }
@@ -321,5 +327,5 @@ fn main() {
 
     println!("{}", &tree);
     println!("{}", val_to_str(tree.get(str_to_key("1"))));
-    save_tree(&tree, "/home/anton/workspace/rust-bplustree-example/db.rust").unwrap();
+    save_tree(&tree, "/home/vladimirov/workspace/rust_apps/db.rust").unwrap();
 }

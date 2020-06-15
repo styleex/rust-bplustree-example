@@ -1,15 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::mem::size_of;
-
-
-#[repr(C, packed)]
-#[derive(Debug)]
-struct Header {
-    magic: u32,
-    version: u32,
-    page_size: u32,
-}
-
+mod types;
 const MAX_KEY_SIZE: usize = 32;
 
 type Key = [u8; MAX_KEY_SIZE];
@@ -44,7 +35,7 @@ fn mmap_view<T>(mmap: &[u8], offset: usize) -> &T where T: Sized + std::fmt::Deb
 }
 
 fn main() {
-    let path = "/home/anton/workspace/rust-bplustree-example/db.rust";
+    let path = "/home/vladimirov/workspace/rust_apps/db.rust";
     let mut f = OpenOptions::new().read(true).open(path).unwrap();
 
     let mmap_data= unsafe {
@@ -52,9 +43,12 @@ fn main() {
         offset(0).map(&f).unwrap()
     };
 
-    let hdr: &Header = mmap_view(&mmap_data, 0);
-    println!("{:?}", hdr);
+    let page: &types::Page = mmap_view(&mmap_data, 0);
+    println!("{:?}", page.meta());
 
-    let node: &Node = mmap_view(&mmap_data, size_of::<Header>());
-    println!("{:?}", node);
+//    let hdr: &Meta = mmap_view(&mmap_data, 0);
+//    println!("{:?}", hdr);
+//
+//    let node: &Node = mmap_view(&mmap_data, size_of::<Meta>());
+//    println!("{:?}", node);
 }
