@@ -24,13 +24,13 @@ struct Node {
     id: NodeId,
     is_leaf: bool,
     parent_id: Option<NodeId>,
-    childs: Vec<NodeId>, // runtime only
-
+    childs: Vec<NodeId>,
+    // runtime only
     inodes: Vec<INode>,
 }
 
 impl Node {
-    pub fn size(&self) -> u64 {
+    pub fn size(&self, tree: &BPlusTree) -> u64 {
         let mut size = size_of::<Page>() as u64;
 
         let stored_inode_size = if self.is_leaf {
@@ -39,19 +39,47 @@ impl Node {
             size_of::<BranchStoredINode>()
         } as u64;
 
-        for inode in self.inodes.iter() {
-            size += stored_inode_size + inode.key.len() as u64;
+        if self.is_leaf {
+            for inode in self.inodes.iter() {
+                size += stored_inode_size + inode.key.len() as u64;
 
-            if inode.value.is_some() {
-                size += inode.value.as_ref().unwrap().len() as u64
-            }
-        };
+                if inode.value.is_some() {
+                    size += inode.value.as_ref().unwrap().len() as u64
+                }
+            };
+        } else {
+            for &child_id in self.childs.iter() {
+                let inode = &tree.node(child_id).inodes[0];
+                size += stored_inode_size + inode.key.len() as u64;
+            };
+        }
 
         size
     }
 
-    pub fn serialize(&self, page: &mut Page) {
+    pub fn header_size(&self, tree: &BPlusTree) -> u64 {
+        let mut size = size_of::<Page>() as u64;
+
+        let stored_inode_size = if self.is_leaf {
+            size_of::<LeafStoredINode>()
+        } else {
+            size_of::<BranchStoredINode>()
+        } as u64;
+
+        if self.is_leaf {
+            for inode in self.inodes.iter() {
+                size += stored_inode_size
+            };
+        } else {
+            for &child_id in self.childs.iter() {
+                size += stored_inode_size
+            };
+        }
+
+        size
     }
+
+    pub fn serialize(&self, page: &Page, data: &Vec<u8>) {}
 }
 
 struct BPlusTree {
@@ -197,7 +225,7 @@ impl BPlusTree {
         // keys[i] <= key < key[i+1] -> i
         // key > keys[last] -> last
         let child_index = node.inodes.iter()
-            .position(|x| key < &x.key)
+            .position(|x| &x.key > key)
             .unwrap_or(node.childs.len() - 1);
 
         return self._tree_search(key, node.childs[child_index]);
@@ -281,7 +309,8 @@ use serde::{Serialize, Deserialize};
 use std::ptr::slice_from_raw_parts;
 use std::mem::size_of;
 use std::os::unix::fs::FileExt;
-use crate::types::{Page, LeafStoredINode, BranchStoredINode, PAGE_BRANCH};
+use crate::types::{Page, LeafStoredINode, BranchStoredINode, PAGE_BRANCH, PAGE_LEAF};
+use std::collections::HashMap;
 
 const VERSION: u32 = 1;
 const MAGIC: u32 = 0x9B9AB9EE;
@@ -297,9 +326,9 @@ fn to_bytes<T>(val: &T) -> &[u8] where T: Sized {
 
 struct Allocator {
     page_size: usize,
-    free_pages: Vec::<u64>,
+    free_pages: Vec<u64>,
     // page_ids
-    allocated_pages: Vec::<u64>,
+    allocated_pages: Vec<u64>,
 }
 
 impl Allocator {
@@ -382,46 +411,146 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
     f.write(to_bytes(&page))?;
     f.write(to_bytes(&h))?;
 
+    let mut writed_pages = HashMap::<NodeId, u64>::new();
+    let mut seen_nodes = HashMap::<NodeId, bool>::new();
     let mut stack = vec![tree.root_id];
+
     loop {
         if stack.is_empty() {
             break;
         }
 
-        let node_id = stack.pop().unwrap();
-        let node_size = tree.node(node_id).size();
-        let mut node_data = Vec::<u8>::new();
-        node_data.resize(node_size as usize, 0);
+        let node = tree.node(stack.pop().unwrap());
+        if !node.childs.is_empty() && !seen_nodes.contains_key(&node.id) {
+            stack.push(node.id);
+            for &child_id in node.childs.iter() {
+                stack.push(child_id);
+            }
+
+            seen_nodes.insert(node.id, true);
+            continue;
+        }
+
+        let node_size = node.size(tree);
+        let node_header_size = node.header_size(tree);
+
+        let mut buffer = Vec::<u8>::new();
+        buffer.resize(node_size as usize, 0);
 
         let mut page = allocator.get_free_page(node_size).unwrap();
-        page.inode_count = tree.node(node_id).inodes.len() as u32;
-        page.flags = PAGE_BRANCH;
+        page.inode_count = if node.is_leaf {
+            node.inodes.len() as u32
+        } else {
+            node.childs.len() as u32
+        };
+
+        page.flags = if node.is_leaf {
+            PAGE_LEAF
+        } else {
+            PAGE_BRANCH
+        };
 
         let page_id = page.id;
-        println!("{:?}", page);
 
+        // 1. Write page header
         let mut offset: usize = 0;
         {
-            offset = serialize_data(&mut node_data, offset, page);
+            offset = serialize_data(&mut buffer, offset, page);
         }
 
-        for inode in tree.node(node_id).inodes.iter() {
-            let data: BranchStoredINode = BranchStoredINode {
-                pos: offset as u32,
-                ksize: inode.key.len() as u32,
-                page_id,
-            };
+        // 2. Write inodes
+        let mut kvoffset = node_header_size as usize;
+        if node.is_leaf {
+            for inode in node.inodes.iter() {
+                let leaf_header: LeafStoredINode = LeafStoredINode {
+                    pos: kvoffset as u32,
+                    ksize: inode.key.len() as u32,
+                    vsize: inode.value.as_ref().unwrap().len() as u32,
+                    page_id: page_id as u32,
+                };
 
-            offset = serialize_data(&mut node_data, offset, data);
+                offset = serialize_data(&mut buffer, offset, leaf_header);
 
-            node_data[offset..offset+inode.key.len()].copy_from_slice(inode.key.as_ref());
-            offset += inode.key.len();
-            // offset = serialize_data(&mut node_data, offset, inode.key.as_ref());
+                buffer[kvoffset..kvoffset + inode.key.len()].copy_from_slice(inode.key.as_ref());
+                kvoffset += inode.key.len();
+
+                buffer[kvoffset..kvoffset + inode.value.as_ref().unwrap().len()].copy_from_slice(inode.value.as_ref().unwrap());
+                kvoffset += inode.value.as_ref().unwrap().len();
+            }
+        } else {
+            for (idx, &child_id) in node.childs.iter().enumerate() {
+                let inode = &tree.node(child_id).inodes[0];
+                let leaf_header: BranchStoredINode = BranchStoredINode {
+                    pos: offset as u32,
+                    ksize: inode.key.len() as u32,
+                    page_id: page_id as u32,
+                };
+
+                offset = serialize_data(&mut buffer, offset, leaf_header);
+
+                buffer[kvoffset..kvoffset + inode.key.len()].copy_from_slice(inode.key.as_ref());
+                kvoffset += inode.key.len();
+            }
         }
 
-
-        f.write_at(node_data.as_slice(), page_id * page_size as u64).unwrap();
+//        for inode in tree.node(node_id).inodes.iter() {
+//            let data: BranchStoredINode = BranchStoredINode {
+//                pos: offset as u32,
+//                ksize: inode.key.len() as u32,
+//                page_id,
+//            };
+//
+//            offset = serialize_data(&mut node_data, offset, data);
+//
+//            node_data[offset..offset+inode.key.len()].copy_from_slice(inode.key.as_ref());
+//            offset += inode.key.len();
+//            // offset = serialize_data(&mut node_data, offset, inode.key.as_ref());
+//        }
+//
+//
+        f.write_at(buffer.as_slice(), page_id * page_size as u64).unwrap();
     }
+//
+//    let mut stack = vec![tree.root_id];
+//    loop {
+//        if stack.is_empty() {
+//            break;
+//        }
+//
+//        let node_id = stack.pop().unwrap();
+//        let node_size = tree.node(node_id).size();
+//        let mut node_data = Vec::<u8>::new();
+//        node_data.resize(node_size as usize, 0);
+//
+//        let mut page = allocator.get_free_page(node_size).unwrap();
+//        page.inode_count = tree.node(node_id).inodes.len() as u32;
+//        page.flags = PAGE_BRANCH;
+//
+//        let page_id = page.id;
+//        println!("{:?}", page);
+//
+//        let mut offset: usize = 0;
+//        {
+//            offset = serialize_data(&mut node_data, offset, page);
+//        }
+//
+//        for inode in tree.node(node_id).inodes.iter() {
+//            let data: BranchStoredINode = BranchStoredINode {
+//                pos: offset as u32,
+//                ksize: inode.key.len() as u32,
+//                page_id,
+//            };
+//
+//            offset = serialize_data(&mut node_data, offset, data);
+//
+//            node_data[offset..offset+inode.key.len()].copy_from_slice(inode.key.as_ref());
+//            offset += inode.key.len();
+//            // offset = serialize_data(&mut node_data, offset, inode.key.as_ref());
+//        }
+//
+//
+//        f.write_at(node_data.as_slice(), page_id * page_size as u64).unwrap();
+//    }
 
 //    f.write_at();
 
@@ -459,5 +588,5 @@ fn main() {
 
     println!("{}", &tree);
     println!("{}", val_to_str(tree.get(str_to_key("1"))));
-    save_tree(&tree, "/home/anton/workspace/rust-bplustree-example/db.rust").unwrap();
+    save_tree(&tree, "/home/vladimirov/workspace/rust_apps/db.rust").unwrap();
 }

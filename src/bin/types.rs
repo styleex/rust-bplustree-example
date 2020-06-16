@@ -7,6 +7,7 @@ use std::iter::FromIterator;
 
 const MAX_KEY_SIZE: usize = 32;
 
+pub type PageId = u64;
 pub type Key = [u8; MAX_KEY_SIZE];
 pub fn key_to_str(val: &[u8]) -> String {
     String::from_iter(
@@ -16,6 +17,10 @@ pub fn key_to_str(val: &[u8]) -> String {
     )
 }
 
+
+pub fn val_to_str(val: &[u8]) -> &str {
+    return str::from_utf8(val).unwrap();
+}
 
 #[repr(C, packed)]
 #[derive(Debug)]
@@ -30,7 +35,7 @@ pub struct Meta {
 pub struct BranchStoredINode {
     pub pos: u32,
     pub ksize: u32,
-    pub page_id: u64,
+    pub page_id: u32,
 }
 
 #[repr(C, packed)]
@@ -95,5 +100,9 @@ impl Page {
         }
 
         None
+    }
+
+    pub fn leaf_elements(&self, &buffer: &[u8]) -> &[LeafStoredINode] {
+
     }
 }

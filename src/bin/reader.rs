@@ -9,7 +9,7 @@ fn mmap_view<T>(mmap: &[u8], offset: usize) -> &T where T: Sized + std::fmt::Deb
 }
 
 fn main() {
-    let path = "/home/anton/workspace/rust-bplustree-example/db.rust";
+    let path = "/home/vladimirov/workspace/rust_apps/db.rust";
     let mut f = OpenOptions::new().read(true).open(path).unwrap();
 
     let mmap_data= unsafe {
@@ -28,14 +28,16 @@ fn main() {
 
     let mut offset: usize = size_of::<types::Page>();
     for i in 0..page.inode_count {
-        let branch_data: &types::BranchStoredINode = mmap_view(&mmap_data, base_offset + offset);
-        offset += size_of::<types::BranchStoredINode>() as usize;
+        let branch_data: &types::LeafStoredINode = mmap_view(&mmap_data, base_offset + offset);
+        offset += size_of::<types::LeafStoredINode>() as usize;
 
         println!("{:?}", branch_data);
 
-        let key: &[u8] = &mmap_data[base_offset+offset..base_offset+offset+branch_data.ksize as usize];
-        offset += branch_data.ksize as usize;
+        let key: &[u8] = &mmap_data[base_offset+(branch_data.pos) as usize..(base_offset as u32 +branch_data.pos+branch_data.ksize) as usize];
         println!("{}", types::key_to_str(key));
+
+        let val: &[u8] = &mmap_data[base_offset+(branch_data.pos + branch_data.ksize) as usize..(base_offset as u32 +branch_data.pos+branch_data.ksize+branch_data.vsize) as usize];
+        println!("{}", types::val_to_str(val));
     }
 //    let hdr: &Meta = mmap_view(&mmap_data, 0);
 //    println!("{:?}", hdr);
