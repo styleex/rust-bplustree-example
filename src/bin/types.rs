@@ -1,8 +1,6 @@
 use std::fmt;
-use std::fs::{File, OpenOptions};
 use std::iter::FromIterator;
 use std::mem::size_of;
-use std::path::Display;
 use std::ptr::slice_from_raw_parts;
 use std::str;
 
@@ -51,24 +49,20 @@ pub struct BranchINodeHeader {
     pub page_id: u32,
 }
 
-pub struct BranchAccess<'a> {
-    pub inode: &'a BranchINodeHeader,
-    pub key: &'a [u8],
-    pub page_id: u32,
-}
+impl BranchINodeHeader {
+    pub fn key(&self) -> &[u8] {
+        let buf = unsafe {
+            let tmp = (self as *const BranchINodeHeader) as *const u8;
+            slice_from_raw_parts(tmp, 999999).as_ref().unwrap()
+        };
 
-impl<'a> BranchAccess<'a> {
-    pub fn new(branch: &'a BranchINodeHeader, key: &'a [u8]) -> BranchAccess<'a> {
-        BranchAccess {
-            inode: branch,
-            key,
-            page_id: branch.page_id,
-        }
+        return &buf[self.pos as usize..(self.pos + self.ksize) as usize];
     }
 }
 
+
 #[repr(C, packed)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct LeafInodeHeader {
     pub pos: u32,
     pub ksize: u32,
@@ -76,21 +70,26 @@ pub struct LeafInodeHeader {
     pub page_id: u32,
 }
 
-pub struct LeafAccess<'a> {
-    pub inode: &'a LeafInodeHeader,
-    pub key: &'a [u8],
-    pub value: &'a [u8],
-}
+impl LeafInodeHeader {
+    pub fn key(&self) -> &[u8] {
+        let buf = unsafe {
+            let tmp = (self as *const LeafInodeHeader) as *const u8;
+            slice_from_raw_parts(tmp, 999999).as_ref().unwrap()
+        };
 
-impl<'a> LeafAccess<'a> {
-    pub fn new(leaf: &'a LeafInodeHeader, key: &'a [u8], value: &'a [u8]) -> LeafAccess<'a> {
-        LeafAccess {
-            inode: leaf,
-            key,
-            value,
-        }
+        return &buf[self.pos as usize..(self.pos + self.ksize) as usize];
+    }
+
+    pub fn value(&self) -> &[u8] {
+        let buf = unsafe {
+            let tmp = (self as *const LeafInodeHeader) as *const u8;
+            slice_from_raw_parts(tmp, 999999).as_ref().unwrap()
+        };
+
+        return &buf[(self.pos + self.ksize) as usize..(self.pos + self.ksize + self.vsize) as usize];
     }
 }
+
 
 pub const PAGE_LEAF: u16 = 0x01;
 pub const PAGE_BRANCH: u16 = 0x02;
@@ -108,39 +107,25 @@ pub struct PageHeader {
     pub page_overflow_count: u32,
 }
 
-pub struct PageAccess {
-    pub header: &'static PageHeader,
-    buffer: &'static [u8],
-}
-
-impl PageAccess {
-    pub fn from_memory(buffer: &'static [u8]) -> PageAccess {
-        let (_, body, _) = unsafe { buffer[0..size_of::<PageHeader>()].align_to::<PageHeader>() };
-
-        PageAccess {
-            header: &body[0],
-            buffer,
-        }
-    }
-
+impl PageHeader {
     pub fn meta(&self) -> Option<&Meta> {
         self._view::<Meta>()
     }
 
     pub fn type_name(&self) -> &str {
-        if self.header.flags & PAGE_BRANCH != 0 {
+        if self.flags & PAGE_BRANCH != 0 {
             return "branch";
         }
 
-        if self.header.flags & PAGE_LEAF != 0 {
+        if self.flags & PAGE_LEAF != 0 {
             return "leaf";
         }
 
-        if self.header.flags & PAGE_FREELIST != 0 {
+        if self.flags & PAGE_FREELIST != 0 {
             return "freelist";
         }
 
-        if self.header.flags & PAGE_META != 0 {
+        if self.flags & PAGE_META != 0 {
             return "meta";
         }
 
@@ -148,13 +133,17 @@ impl PageAccess {
     }
 
     pub fn is_leaf(&self) -> bool {
-        self.header.flags & PAGE_LEAF != 0
+        self.flags & PAGE_LEAF != 0
+    }
+
+    pub fn is_branch(&self) -> bool {
+        self.flags & PAGE_BRANCH != 0
     }
 
     fn _view<T>(&self) -> Option<&T> where T: Sized {
-        let raw_h: *const u8 = (self.header as *const PageHeader) as *const u8;
         let buf = unsafe {
-            slice_from_raw_parts(raw_h, size_of::<PageHeader>() + size_of::<T>() as usize).as_ref().unwrap()
+            let tmp = (self as *const PageHeader) as *const u8;
+            slice_from_raw_parts(tmp, size_of::<PageHeader>() + size_of::<T>() as usize).as_ref().unwrap()
         };
 
         let (_, body, _) = unsafe { buf[size_of::<PageHeader>()..size_of::<PageHeader>() + size_of::<T>()].align_to::<T>() };
@@ -166,48 +155,48 @@ impl PageAccess {
         None
     }
 
-    pub fn leaf_elements(&self) -> Vec<LeafAccess> {
-        let inode = (&self.buffer[size_of::<PageHeader>()..] as *const [u8]) as *const LeafInodeHeader;
-
-        let inodes = unsafe {
-            slice_from_raw_parts(inode, self.header.inode_count as usize).as_ref().unwrap()
+    pub fn leaf_inodes(&self) -> &[LeafInodeHeader] {
+        if !self.is_leaf() {
+            panic!("Access as leaf on non leaf element");
+        }
+        let buf = unsafe {
+            let tmp = (self as *const PageHeader) as *const u8;
+            slice_from_raw_parts(tmp, 4096).as_ref().unwrap()
         };
 
-        let mut ret = Vec::<LeafAccess>::with_capacity(self.header.inode_count as usize);
+        let inode = (&buf[size_of::<PageHeader>()..] as *const [u8]) as *const LeafInodeHeader;
 
-        for leaf in inodes.iter() {
-            let k = &self.buffer[(leaf.pos as usize)..(leaf.pos as usize) + (leaf.ksize as usize)];
-            let v = &self.buffer[((leaf.pos + leaf.ksize) as usize)..((leaf.pos + leaf.ksize) as usize) + (leaf.vsize as usize)];
+        let inodes = unsafe {
+            slice_from_raw_parts(inode, self.inode_count as usize).as_ref().unwrap()
+        };
 
-            ret.push(LeafAccess::new(leaf, k, v));
-        }
-
-        ret
+        return inodes;
     }
 
-    pub fn branch_elements(&self) -> Vec<BranchAccess> {
-        let inode = (&self.buffer[size_of::<PageHeader>()..] as *const [u8]) as *const BranchINodeHeader;
-
-        let inodes = unsafe {
-            slice_from_raw_parts(inode, self.header.inode_count as usize).as_ref().unwrap()
-        };
-
-        let mut ret = Vec::<BranchAccess>::with_capacity(self.header.inode_count as usize);
-
-        for branch in inodes.iter() {
-            let k = &self.buffer[(branch.pos as usize)..(branch.pos as usize) + (branch.ksize as usize)];
-
-            ret.push(BranchAccess::new(branch, k));
+    pub fn branch_inodes(&self) -> &[BranchINodeHeader] {
+        if !self.is_branch() {
+            panic!("Access as branch on non branch element");
         }
 
-        ret
+        let buf = unsafe {
+            let tmp = (self as *const PageHeader) as *const u8;
+            slice_from_raw_parts(tmp, 99999).as_ref().unwrap()
+        };
+
+        let inode = (&buf[size_of::<PageHeader>()..] as *const [u8]) as *const BranchINodeHeader;
+
+        let inodes = unsafe {
+            slice_from_raw_parts(inode, self.inode_count as usize).as_ref().unwrap()
+        };
+
+        return inodes;
     }
 }
 
 
-impl fmt::Display for PageAccess {
+impl fmt::Display for PageHeader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} page: {:?}", self.type_name(), self.header)?;
+        write!(f, "{} page: {:?}", self.type_name(), self)?;
 
         fmt::Result::Ok(())
     }

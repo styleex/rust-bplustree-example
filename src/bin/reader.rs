@@ -1,10 +1,6 @@
 use std::fs::{File, OpenOptions};
-use std::iter::FromIterator;
-use std::mem::size_of;
-
 use memmap::Mmap;
-
-use types::{Key, key_to_str, Meta, PageAccess, PageHeader, PageId, str_to_key, val_to_str};
+use types::{Key, key_to_str, PageHeader, PageId, str_to_key, val_to_str};
 
 mod types;
 
@@ -32,28 +28,34 @@ impl DB {
         return db;
     }
 
-    fn page(&self, id: PageId) -> PageAccess {
-        PageAccess::from_memory(&self.mmap_data[(id as usize) * self.page_size..])
+    fn page(&self, id: PageId) -> &PageHeader {
+        let (_, body, _) = unsafe { self.mmap_data[(id as usize) * self.page_size..].align_to::<PageHeader>() };
+        return &body[0];
     }
 
     // Ищет листовой элемент, в котором должен (но не обязан, если его вообще не добавляли)
     // располагаться нужный ключ
     fn _tree_search_page(&self, k: Key, page_id: PageId) -> PageId {
         let page = self.page(page_id);
-        let branch = page.branch_elements();
-        for b in branch.iter().as_ref() {
-            println!("{}", key_to_str(b.key));
+
+        let mut ret_idx = (page.inode_count - 1) as usize;
+        for (idx, inode) in page.branch_inodes().iter().enumerate() {
+            println!("{} page_id={}", key_to_str(inode.key()), inode.page_id);
+
+            if inode.key() > &k {
+                ret_idx = (idx - 1) as usize;
+                break
+            }
         }
 
-        let pos = branch.iter().position(|x| x.key >= &k).unwrap_or((page.header.inode_count - 1) as usize);
-        return branch[pos].page_id as PageId;
+        return page.branch_inodes()[ret_idx].page_id as PageId;
     }
 
     pub fn search(&self, k: Key) -> PageId {
         let mut page_id = self.page(0).meta().unwrap().root_page as PageId;
 
         loop {
-            println!("{}", self.page(page_id));
+            println!("{:?}", self.page(page_id));
             if self.page(page_id).is_leaf() {
                 return page_id;
             }
@@ -61,26 +63,26 @@ impl DB {
             page_id = self._tree_search_page(k, page_id);
         }
     }
+
+    pub fn get(&self, k: Key) -> Option<&[u8]> {
+        let page_id = self.search(k);
+
+        return self.page(page_id).leaf_inodes()
+            .iter()
+            .find(|inode| inode.key() == &k)
+            .map(|x| x.value());
+    }
 }
 
 
 fn main() {
-    let db = DB::open("/home/vladimirov/workspace/rust_apps/db.rust");
+    let db = DB::open("/home/anton/workspace/rust-bplustree-example/db.rust");
 
-    let k = str_to_key("92");
-    let page_id = db.search(k);
-
-    let leafs = db.page(page_id).leaf_elements();
-    for i in leafs.iter() {
-        println!("{}", key_to_str(i.key));
-    }
-
-    let pg = db.page(page_id).leaf_elements();
-    let ret = leafs.iter()
-        .find(|leaf| leaf.key == &k);
+    let k = str_to_key("100");
+    let ret = db.get(k);
 
     if ret.is_some() {
-        println!("ret: {}", val_to_str(ret.unwrap().value));
+        println!("ret: {}", val_to_str(ret.unwrap()));
     } else {
         println!("ret: not found");
     }

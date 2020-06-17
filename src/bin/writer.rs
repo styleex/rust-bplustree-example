@@ -1,7 +1,18 @@
-use std::fmt::Display;
+// extern crate serde_derive;
+extern crate bincode;
+
 use core::fmt;
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::fs::{OpenOptions};
+use std::io::{Write};
 use std::iter::FromIterator;
+use std::mem::size_of;
+use std::os::unix::fs::FileExt;
+use std::ptr::slice_from_raw_parts;
 use std::str;
+
+use crate::types::{BranchINodeHeader, LeafInodeHeader, PAGE_BRANCH, PAGE_LEAF, PageHeader};
 
 mod types;
 
@@ -166,6 +177,46 @@ impl BPlusTree {
         return id;
     }
 
+    fn update_childs(&mut self) {
+        let mut seen_nodes = HashMap::<NodeId, bool>::new();
+        let mut stack = vec![self.root_id];
+
+        loop {
+            if stack.is_empty() {
+                break;
+            }
+
+            let node_id = stack.pop().unwrap() as usize;
+            if !seen_nodes.contains_key(&node_id) {
+                stack.push(node_id);
+                for &child_id in self.nodes[node_id].childs.iter() {
+                    stack.push(child_id);
+                }
+
+                seen_nodes.insert(node_id, true);
+                continue;
+            }
+
+            if self.nodes[node_id].is_leaf {
+                continue;
+            }
+
+            self.nodes[node_id].inodes.clear();
+
+            let mut inodes = Vec::<INode>::new();
+            for &child_id in self.nodes[node_id].childs.iter() {
+                let k = self.nodes[child_id as usize].inodes[0].key;
+                inodes.push(INode{
+                    key: k,
+                    value: None,
+                });
+            }
+
+            inodes.sort_by_key(|x| x.key);
+            self.nodes[node_id].inodes = inodes;
+        }
+    }
+
     fn split(&mut self, left_node_id: NodeId) {
         let middle = self.order / 2;
 
@@ -300,19 +351,6 @@ pub fn val_to_str(val: Option<&Vec<u8>>) -> &str {
 
     return str::from_utf8(val.unwrap()).unwrap();
 }
-
-// extern crate serde_derive;
-extern crate bincode;
-
-use std::fs::{File, OpenOptions};
-use memmap::{Mmap, MmapOptions};
-use std::io::{Write, Result};
-use serde::{Serialize, Deserialize};
-use std::ptr::slice_from_raw_parts;
-use std::mem::size_of;
-use std::os::unix::fs::FileExt;
-use crate::types::{PageHeader, LeafInodeHeader, BranchINodeHeader, PAGE_BRANCH, PAGE_LEAF};
-use std::collections::HashMap;
 
 const VERSION: u32 = 1;
 const MAGIC: u32 = 0x9B9AB9EE;
@@ -455,9 +493,9 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
         // 2. Write inodes
         let mut kvoffset = node_header_size as usize;
         if node.is_leaf {
-            for inode in node.inodes.iter() {
+            for (idx, inode) in node.inodes.iter().enumerate() {
                 let leaf_header: LeafInodeHeader = LeafInodeHeader {
-                    pos: kvoffset as u32,
+                    pos: kvoffset as u32 - ((idx) * size_of::<LeafInodeHeader>() + size_of::<PageHeader>()) as u32,
                     ksize: inode.key.len() as u32,
                     vsize: inode.value.as_ref().unwrap().len() as u32,
                     page_id: page_id as u32,
@@ -475,7 +513,7 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
             for (idx, &child_id) in node.childs.iter().enumerate() {
                 let inode = &tree.node(child_id).inodes[0];
                 let branch_header: BranchINodeHeader = BranchINodeHeader {
-                    pos: kvoffset as u32,
+                    pos: kvoffset as u32 - ((idx) * size_of::<BranchINodeHeader>() + size_of::<PageHeader>()) as u32, // offset относительно текущего branch_header для удобства чтения
                     ksize: inode.key.len() as u32,
                     page_id: *writed_pages.get(&child_id).unwrap() as u32,
                 };
@@ -526,7 +564,7 @@ fn main() {
     tree.add(str_to_key("16"), "asd16".bytes().collect());
 
     tree.add(str_to_key("88"), "asd88".bytes().collect());
-    tree.add(str_to_key("56"), "asd56".repeat(10000).bytes().collect());
+    tree.add(str_to_key("56"), "asd56".repeat(1).bytes().collect());
     tree.add(str_to_key("100"), "asd100".bytes().collect());
     tree.add(str_to_key("33"), "asd33".bytes().collect());
     tree.add(str_to_key("54"), "asd54".bytes().collect());
@@ -535,7 +573,8 @@ fn main() {
     tree.add(str_to_key("24"), "asd24".bytes().collect());
     tree.add(str_to_key("92"), "asd92".bytes().collect());
 
+    tree.update_childs();
     println!("{}", &tree);
     println!("{}", val_to_str(tree.get(str_to_key("1"))));
-    save_tree(&tree, "/home/vladimirov/workspace/rust_apps/db.rust").unwrap();
+    save_tree(&tree, "/home/anton/workspace/rust-bplustree-example/db.rust").unwrap();
 }
