@@ -279,9 +279,9 @@ impl BPlusTree {
         // key > keys[last] -> last
         let child_index = node.inodes.iter()
             .position(|x| &x.key > key)
-            .unwrap_or(node.childs.len() - 1);
+            .unwrap_or(node.childs.len());
 
-        return self._tree_search(key, node.childs[child_index]);
+        return self._tree_search(key, node.childs[child_index - 1]);
     }
 }
 
