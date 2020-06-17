@@ -31,12 +31,12 @@ struct Node {
 
 impl Node {
     pub fn size(&self, tree: &BPlusTree) -> u64 {
-        let mut size = size_of::<Page>() as u64;
+        let mut size = size_of::<PageHeader>() as u64;
 
         let stored_inode_size = if self.is_leaf {
-            size_of::<LeafINode>()
+            size_of::<LeafInodeHeader>()
         } else {
-            size_of::<BranchINode>()
+            size_of::<BranchINodeHeader>()
         } as u64;
 
         if self.is_leaf {
@@ -58,12 +58,12 @@ impl Node {
     }
 
     pub fn header_size(&self, tree: &BPlusTree) -> u64 {
-        let mut size = size_of::<Page>() as u64;
+        let mut size = size_of::<PageHeader>() as u64;
 
         let stored_inode_size = if self.is_leaf {
-            size_of::<LeafINode>()
+            size_of::<LeafInodeHeader>()
         } else {
-            size_of::<BranchINode>()
+            size_of::<BranchINodeHeader>()
         } as u64;
 
         if self.is_leaf {
@@ -79,7 +79,7 @@ impl Node {
         size
     }
 
-    pub fn serialize(&self, page: &Page, data: &Vec<u8>) {}
+    pub fn serialize(&self, page: &PageHeader, data: &Vec<u8>) {}
 }
 
 struct BPlusTree {
@@ -140,10 +140,12 @@ impl BPlusTree {
     }
 
     fn insert_key_to_node(&mut self, node_id: NodeId, key: Key, value: Option<Vec<u8>>) {
+        // FIXME: щас вощможны дубликаты
         let ret_idx = self.node_mut(node_id).inodes.binary_search_by_key(&key, |inode| inode.key)
             .unwrap_or_else(|x| x);
 
         self.node_mut(node_id).inodes.insert(ret_idx, INode { key, value });
+        self.node_mut(node_id).inodes.dedup_by_key(|x| x.key);
     }
 
     // Регистрирует ноду в дереве и обновляет ссылки у дочерних элементов на вновь созданный ID
@@ -309,7 +311,7 @@ use serde::{Serialize, Deserialize};
 use std::ptr::slice_from_raw_parts;
 use std::mem::size_of;
 use std::os::unix::fs::FileExt;
-use crate::types::{Page, LeafINode, BranchINode, PAGE_BRANCH, PAGE_LEAF};
+use crate::types::{PageHeader, LeafInodeHeader, BranchINodeHeader, PAGE_BRANCH, PAGE_LEAF};
 use std::collections::HashMap;
 
 const VERSION: u32 = 1;
@@ -336,18 +338,18 @@ impl Allocator {
         let page_count = (file_len / page_size as u64) as usize;
 
         let mut free_pages = vec![];
-        for i in 0..page_count {
+        for i in 1..page_count {
             free_pages.push(i as u64);
         }
 
         Allocator {
             page_size,
             free_pages,
-            allocated_pages: vec![],
+            allocated_pages: vec![0],
         }
     }
 
-    pub fn get_free_page(&mut self, size: u64) -> Option<Page> {
+    pub fn get_free_page(&mut self, size: u64) -> Option<PageHeader> {
         let mut total_size = 0 as u64;
         let mut pages = Vec::<u64>::new();
         loop {
@@ -365,7 +367,7 @@ impl Allocator {
             }
         }
 
-        Some(Page {
+        Some(PageHeader {
             id: pages[0],
             page_overflow_count: (pages.len() - 1) as u32,
             flags: 0,
@@ -395,7 +397,7 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
     let page_size = page_size::get();
     let mut f = OpenOptions::new().read(true).write(true).create(true).open(path)?;
     f.set_len(0)?;
-    f.set_len((page_size * 100) as u64)?;
+    f.set_len((page_size * 1024 * 10) as u64)?;
 
     let mut allocator = Allocator::new(page_size, f.metadata().unwrap().len());
 
@@ -454,7 +456,7 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
         let mut kvoffset = node_header_size as usize;
         if node.is_leaf {
             for inode in node.inodes.iter() {
-                let leaf_header: LeafINode = LeafINode {
+                let leaf_header: LeafInodeHeader = LeafInodeHeader {
                     pos: kvoffset as u32,
                     ksize: inode.key.len() as u32,
                     vsize: inode.value.as_ref().unwrap().len() as u32,
@@ -472,7 +474,7 @@ fn save_tree(tree: &BPlusTree, path: &str) -> std::io::Result<()> {
         } else {
             for (idx, &child_id) in node.childs.iter().enumerate() {
                 let inode = &tree.node(child_id).inodes[0];
-                let branch_header: BranchINode = BranchINode {
+                let branch_header: BranchINodeHeader = BranchINodeHeader {
                     pos: kvoffset as u32,
                     ksize: inode.key.len() as u32,
                     page_id: *writed_pages.get(&child_id).unwrap() as u32,
@@ -535,5 +537,5 @@ fn main() {
 
     println!("{}", &tree);
     println!("{}", val_to_str(tree.get(str_to_key("1"))));
-    save_tree(&tree, "/home/anton/workspace/rust-bplustree-example/db.rust").unwrap();
+    save_tree(&tree, "/home/vladimirov/workspace/rust_apps/db.rust").unwrap();
 }
