@@ -53,7 +53,7 @@ impl BranchINodeHeader {
     pub fn key(&self) -> &[u8] {
         let buf = unsafe {
             let tmp = (self as *const BranchINodeHeader) as *const u8;
-            slice_from_raw_parts(tmp, 999999).as_ref().unwrap()
+            slice_from_raw_parts(tmp, std::usize::MAX).as_ref().unwrap()
         };
 
         return &buf[self.pos as usize..(self.pos + self.ksize) as usize];
@@ -74,7 +74,7 @@ impl LeafInodeHeader {
     pub fn key(&self) -> &[u8] {
         let buf = unsafe {
             let tmp = (self as *const LeafInodeHeader) as *const u8;
-            slice_from_raw_parts(tmp, 999999).as_ref().unwrap()
+            slice_from_raw_parts(tmp, std::usize::MAX).as_ref().unwrap()
         };
 
         return &buf[self.pos as usize..(self.pos + self.ksize) as usize];
@@ -83,7 +83,7 @@ impl LeafInodeHeader {
     pub fn value(&self) -> &[u8] {
         let buf = unsafe {
             let tmp = (self as *const LeafInodeHeader) as *const u8;
-            slice_from_raw_parts(tmp, 999999).as_ref().unwrap()
+            slice_from_raw_parts(tmp, std::usize::MAX).as_ref().unwrap()
         };
 
         return &buf[(self.pos + self.ksize) as usize..(self.pos + self.ksize + self.vsize) as usize];
@@ -180,7 +180,7 @@ impl PageHeader {
 
         let buf = unsafe {
             let tmp = (self as *const PageHeader) as *const u8;
-            slice_from_raw_parts(tmp, 99999).as_ref().unwrap()
+            slice_from_raw_parts(tmp, std::usize::MAX).as_ref().unwrap()
         };
 
         let inode = (&buf[size_of::<PageHeader>()..] as *const [u8]) as *const BranchINodeHeader;
