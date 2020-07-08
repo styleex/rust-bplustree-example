@@ -1,6 +1,3 @@
-// extern crate serde_derive;
-extern crate bincode;
-
 use core::fmt;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -576,5 +573,5 @@ fn main() {
     tree.update_childs();
     println!("{}", &tree);
     println!("{}", val_to_str(tree.get(str_to_key("1"))));
-    save_tree(&tree, "/home/anton/workspace/rust-bplustree-example/db.rust").unwrap();
+    save_tree(&tree, std::env::current_dir().unwrap().as_path().join("db.rust").as_path().to_str().unwrap()).unwrap();
 }
