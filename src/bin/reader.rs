@@ -3,12 +3,11 @@ use std::fs::{File, OpenOptions};
 use memmap::Mmap;
 use log::{info, trace, warn};
 use types::{Key, key_to_str, PageHeader, PageId, str_to_key, val_to_str};
-use crate::node::INode;
 
 mod types;
 mod node;
 
-type TxFunc<'a> = fn(tx: &'a mut Tx);
+use node::{INode, HeapValue};
 
 pub struct DB {
     f: File,
@@ -98,7 +97,7 @@ impl<'a> DB {
 
 pub struct Tx<'a> {
     db: &'a DB,
-    node_cache: node::NodeCache<'a>,
+    node_cache: node::NodeCache<'a>
 }
 
 // 1. При чтении - читаются данные из страницы. Страница при этом не должна удаляться
@@ -134,12 +133,17 @@ impl<'a> Tx<'a> {
             self.node_cache.read_node(pg)
         };
 
-        let pos = self.node_cache.nodes[node_id].inodes.binary_search_by_key(&key, |x| x.key);
+        let pos = self.node_cache.nodes[node_id].inodes.binary_search_by_key(&key.as_ref(), |x| x.key());
         match pos {
             Ok(pos) => {
-                self.node_cache.nodes[node_id].inodes[pos].value_raw = Some(val);
+                self.node_cache.nodes[node_id].inodes[pos].value = HeapValue::Heap(val);
             },
             Err(pos) => {
+                self.node_cache.nodes[node_id].inodes.insert(pos, INode {
+                    key: HeapValue::Heap(Vec::from(key)),
+                    value: HeapValue::Heap(val),
+                    page_id: None,
+                })
             }
         }
     }
@@ -162,11 +166,10 @@ fn main() {
     } else {
         println!("ret: not found");
     }
-    {
-        db.update(|tx| {
-            tx.put(str_to_key("3"), "asd65".bytes().collect());
-        });
-    }
+
+    db.update(|tx| {
+        tx.put(str_to_key("3"), "asd65".bytes().collect());
+    });
 
     db.close();
 }
